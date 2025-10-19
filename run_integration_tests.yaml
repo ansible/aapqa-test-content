@@ -1,5 +1,6 @@
 ---
-- hosts: test_env
+- name: Run downstream integration tests
+  hosts: all
   gather_facts: "{{ facts_gathering|default(true) }}"
   vars:
     collection_path: /usr/share/ansible/collections/ansible_collections
@@ -11,7 +12,7 @@
 
   tasks:
     - name: Find integration test targets
-      find:
+      ansible.builtin.find:
         file_type: directory
         paths: "{{ integration_tests_path }}"
         pattern: "{{ integration_tests_pattern }}"
@@ -20,24 +21,38 @@
       delegate_to: localhost
 
     - name: Format integration targets
-      set_fact:
+      ansible.builtin.set_fact:
         _integration_targets: "{{ _targets.files | map(attribute='path') | list | sort }}"
 
     - name: Report missing integration targets
-      fail:
+      ansible.builtin.fail:
         msg: "No integration targets found"
-      when: _integration_targets|length == 0
+      when: _integration_targets | length == 0
 
     - name: Test targets found
-      debug:
+      ansible.builtin.debug:
         msg: "{{ _integration_targets }}"
 
+    - name: Check if runme.sh file exists in target directory
+      ansible.builtin.stat:
+        path: "{{ _integration_targets[0] }}/runme.sh"
+      register: runme_file_status
+
+    - name: Run runme.sh to execute integration tests if runme.sh file exists at target
+      ansible.builtin.command: "./runme.sh"
+      args:
+        chdir: "{{ _integration_targets[0] }}"
+      register: runme_result
+      changed_when: runme_result.rc != 0
+      when: runme_file_status.stat.exists
+
     - name: Run integration tests
-      include_role:
+      ansible.builtin.include_role:
         name: run_integration_tests
         tasks_from: run_integration_tests
         apply:
           environment:
-            ANSIBLE_DEBUG_BOTOCORE_LOGS: True
+            ANSIBLE_DEBUG_BOTOCORE_LOGS: true
       with_items:
         - "{{ _integration_targets }}"
+      when: not runme_file_status.stat.exists
